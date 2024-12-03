@@ -714,6 +714,17 @@ void Window::onSetText()
   initTheme();
 }
 
+void Window::onVisible(bool visible)
+{
+  Widget::onVisible(visible);
+  Display* display = this->display();
+  if (ownDisplay() &&
+      display &&
+      display->nativeWindow()) {
+    display->nativeWindow()->setVisible(visible);
+  }
+}
+
 void Window::onBuildTitleLabel()
 {
   if (text().empty()) {

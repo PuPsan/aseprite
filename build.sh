@@ -22,7 +22,7 @@ echo "======================= BUILD ASEPRITE HELPER ========================"
 
 # Check that we are running the script from the Aseprite clone directory.
 pwd=$(pwd)
-if [ ! -f "$pwd/README.md" ] ; then
+if [[ ! -f "$pwd/EULA.txt" || ! -f "$pwd/.gitmodules" ]] ; then
     echo ""
     echo "Run build script from the Aseprite directory"
     exit 1
@@ -97,6 +97,44 @@ if ! ninja --version >/dev/null ; then
     echo "  https://github.com/ninja-build/ninja/releases"
     echo ""
     exit 1
+fi
+
+# Check that all submodules are checked out.
+run_submodule_update=
+for module in $(cat "$pwd/.gitmodules" | \
+                    grep '^\[submodule' | \
+                    sed -e 's/^\[.*\"\(.*\)\"\]/\1/') \
+              $(cat "$pwd/laf/.gitmodules" | \
+                    grep '^\[submodule' | \
+                    sed -e 's/^\[.*\"\(.*\)\"\]/laf\/\1/') ; do
+    if [[ ! -f "$module/CMakeLists.txt" &&
+          ! -f "$module/Makefile" &&
+          ! -f "$module/makefile" &&
+          ! -f "$module/Makefile.am" ]] ; then
+        echo ""
+        echo "Module $module doesn't exist."
+        if [ $auto ] ; then
+            run_submodule_update=1
+            break
+        else
+            echo "Run:"
+            echo ""
+            echo "  git submodule update --init --recursive"
+            echo ""
+            exit 1
+        fi
+    fi
+done
+if [ $run_submodule_update ] ; then
+    echo "Running:"
+    echo ""
+    echo "  git submodule update --init --recursive"
+    echo ""
+    if ! git submodule update --init --recursive ; then
+        echo "Failed, try again"
+        exit 1
+    fi
+    echo "Done"
 fi
 
 # Create the directory to store the configuration.
@@ -221,6 +259,7 @@ if [[ $n -eq 1 ]] ; then
     echo "First build directory: $active_build_dir"
 else
     echo "N. New build (N key)"
+    echo "U. Update Visual Studio/Windows Kit/macOS SDK version (U key)"
     read -p "Select an option or number to build? " build_n
 
     # New build
@@ -239,7 +278,38 @@ else
             new_build_name=$REPLY
         fi
         active_build_dir="$builds_dir/$new_build_name"
-    else
+
+    # Update SDK
+    elif [[ "$build_n" == "u" || "$build_n" == "U" ]] ; then
+        echo "Update SDK dirs..."
+        if [ $is_win ] ; then
+            newclver=$(echo $VCToolsInstallDir | sed -e 's_^.*\\\([0-9\.]*\)\\$_\1_')
+
+            function update_file {
+                file=$1
+                echo "--- Updating $file ---" | tee -a "$pwd/.build/log"
+                mv "$file" "$file-old"
+                cat "$file-old" | sed -e 's_^\(.*/VC/Tools/MSVC/\)\([0-9\.]*\)\(.*$\)_\1'$newclver'\3_' > "$file"
+                diff -w -u3 "$file-old" "$file" >> "$pwd/.build/log"
+                echo "--- End $file ---" >> "$pwd/.build/log"
+            }
+
+            echo "New VC version: $newclver"
+            for file in $(cat $builds_list) ; do
+                build_dir=$(dirname $file)
+                echo "--- Updating $build_dir ---"
+                update_file "$file"
+                for other_file in "$build_dir/CMakeFiles/rules.ninja" \
+                                  "$build_dir"/CMakeFiles/*/*.cmake \
+                                  "$build_dir/third_party/libpng/scripts/genout.cmake" ; do
+                    update_file "$other_file"
+                done
+            done
+        fi
+        echo "Done"
+        exit
+
+    else # Build the selected dir
         n=1
         for file in $(cat $builds_list) ; do
             if [ "$n" == "$build_n" ] ; then
@@ -414,13 +484,13 @@ if [ ! -f "$active_build_dir/ninja.build" ] ; then
          -DLAF_BACKEND=skia \
          -DSKIA_DIR="$skia_dir" \
          -DSKIA_LIBRARY_DIR="$skia_library_dir" | \
-            tee "$pwd/.build/log" ; then
+            tee -a "$pwd/.build/log" ; then
         echo "Error running cmake."
         exit 1
     fi
 fi
 echo "============================== BUILDING =============================="
-if ! cmake --build "$active_build_dir" -- aseprite | tee "$pwd/.build/log" ; then
+if ! cmake --build "$active_build_dir" -- aseprite | tee -a "$pwd/.build/log" ; then
     echo "Error building Aseprite."
     exit 1
 fi

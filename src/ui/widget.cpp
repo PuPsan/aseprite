@@ -13,6 +13,7 @@
 
 #include "ui/widget.h"
 
+#include "base/log.h"
 #include "base/memory.h"
 #include "base/string.h"
 #include "base/utf8_decode.h"
@@ -231,6 +232,11 @@ void Widget::setVisible(bool state)
       if (auto man = manager())
         man->freeWidget(this); // Free from manager
       enableFlags(HIDDEN);
+
+      // As this widget was hidden we need to invalidate the area it was
+      // occupying
+      if (auto man = manager())
+        man->invalidateRect(bounds());
 
       onVisible(false);
     }
